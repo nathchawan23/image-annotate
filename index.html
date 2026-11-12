@@ -147,6 +147,7 @@ canvas{display:block;touch-action:none;background:#fff}
   background:var(--ink);color:var(--panel);padding:8px 14px;border-radius:8px;font-size:13.5px;
   max-width:calc(100% - 32px);
 }
+.toast .tact{margin-left:12px;border:0;border-radius:6px;padding:4px 10px;background:var(--accent);color:var(--accent-ink);font-weight:600}
 .modal{
   position:fixed;inset:0;z-index:30;background:rgba(10,14,20,.6);display:grid;place-items:center;padding:16px;
 }
@@ -157,6 +158,9 @@ canvas{display:block;touch-action:none;background:#fff}
 .sheet h2{margin:0;font-size:16px;font-weight:700;text-wrap:balance}
 .sheet p{margin:0;color:var(--muted)}
 .sheet .imgs{display:flex;flex-direction:column;gap:12px;overflow:auto}
+.sheet .dl{display:flex;flex-direction:column;gap:8px;align-items:center}
+.sheet a.btn{text-decoration:none}
+.sheet .dl img{max-height:200px}
 .sheet img{max-width:100%;max-height:60vh;object-fit:contain;border:1px solid var(--line);border-radius:6px;align-self:center}
 .sheet .row{display:flex;justify-content:flex-end}
 @media (max-width:480px){
@@ -291,7 +295,7 @@ canvas{display:block;touch-action:none;background:#fff}
 <div class="modal" id="modal" hidden>
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <h2 id="modalTitle">รูปพร้อมแล้ว</h2>
-    <p>หน้านี้บันทึกไฟล์ให้อัตโนมัติไม่ได้ คลิกขวาที่แต่ละรูป (หรือกดค้างบนมือถือ) แล้วเลือก “บันทึกรูปภาพ”</p>
+    <p id="modalHelp"></p>
     <div class="imgs" id="modalImgs"></div>
     <div class="row"><button class="btn" id="modalClose" type="button">ปิด</button></div>
   </div>
@@ -616,9 +620,14 @@ function syncUI(){
 function setTool(t){ closeEditor(true); tool = t; if (t !== "select") selId = null; syncUI(); render(); }
 
 var toastT = 0;
-function toast(msg){
+function toast(msg, actLabel, actFn, ms){
   var t = $("toast"); t.textContent = msg; t.hidden = false;
-  clearTimeout(toastT); toastT = setTimeout(function(){ t.hidden = true; }, 3200);
+  if (actLabel){
+    var b = document.createElement("button"); b.type = "button"; b.className = "tact"; b.textContent = actLabel;
+    b.addEventListener("click", function(){ t.hidden = true; actFn(); });
+    t.appendChild(b);
+  }
+  clearTimeout(toastT); toastT = setTimeout(function(){ t.hidden = true; }, ms || 3200);
 }
 
 /* ---------- fit ---------- */
@@ -1022,16 +1031,25 @@ function directSave(blob, name){
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(function(){ URL.revokeObjectURL(u); }, 20000);
 }
-function showModal(blobs){
+function showModal(blobs, names){
   if (!Array.isArray(blobs)) blobs = [blobs];
   var box = $("modalImgs");
   (modalUrl || []).forEach(function(u){ URL.revokeObjectURL(u); });
   modalUrl = []; box.textContent = "";
   blobs.forEach(function(b, i){
     var u = URL.createObjectURL(b), im = document.createElement("img");
-    modalUrl.push(u); im.src = u; im.alt = "รูปที่ " + (i+1) + " ที่ใส่สัญลักษณ์แล้ว"; box.appendChild(im);
+    modalUrl.push(u); im.src = u; im.alt = "รูปที่ " + (i+1) + " ที่ใส่สัญลักษณ์แล้ว";
+    if (standalone && names && names[i]){
+      var row = document.createElement("div"); row.className = "dl";
+      var a = document.createElement("a"); a.className = "btn primary"; a.href = u; a.download = names[i];
+      a.textContent = "ดาวน์โหลดรูปที่ " + (i+1);
+      row.appendChild(im); row.appendChild(a); box.appendChild(row);
+    } else box.appendChild(im);
   });
   $("modalTitle").textContent = blobs.length > 1 ? "รูปพร้อมแล้ว " + blobs.length + " รูป" : "รูปพร้อมแล้ว";
+  $("modalHelp").textContent = (standalone && names)
+    ? "ถ้าได้ไฟล์ไม่ครบ เบราว์เซอร์อาจบล็อกการดาวน์โหลดหลายไฟล์ไว้ ให้กดไอคอนที่ขึ้นมาท้ายแถบที่อยู่เว็บแล้วเลือกอนุญาตเสมอ หรือกดดาวน์โหลดทีละรูปด้านล่าง"
+    : "หน้านี้บันทึกไฟล์ให้อัตโนมัติไม่ได้ คลิกขวาที่แต่ละรูป (หรือกดค้างบนมือถือ) แล้วเลือก “บันทึกรูปภาพ”";
   $("modal").hidden = false; $("modalClose").focus();
 }
 $("modalClose").addEventListener("click", function(){ $("modal").hidden = true; });
@@ -1087,8 +1105,23 @@ $("saveAllBtn").addEventListener("click", function(){
     var files = list.filter(Boolean);
     if (!files.length){ toast("สร้างไฟล์รูปไม่สำเร็จ"); return; }
     if (standalone){
-      files.forEach(function(f, i){ setTimeout(function(){ directSave(f.blob, f.name); }, i*300); });
-      toast("กำลังดาวน์โหลด " + files.length + " รูป ถ้าเบราว์เซอร์ถาม ให้กดอนุญาตดาวน์โหลดหลายไฟล์");
+      var blobs = files.map(function(f){ return f.blob; }), names = files.map(function(f){ return f.name; });
+      var coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches, shareFiles = null;
+      if (coarse && navigator.canShare && window.File){
+        try {
+          shareFiles = files.map(function(f){ return new File([f.blob], f.name, {type: "image/png"}); });
+          if (!navigator.canShare({files: shareFiles})) shareFiles = null;
+        } catch (e){ shareFiles = null; }
+      }
+      if (shareFiles){
+        navigator.share({files: shareFiles}).then(function(){ toast("ส่งออก " + files.length + " รูปแล้ว"); }, function(err){
+          if (err && err.name === "AbortError") return;
+          showModal(blobs, names);
+        });
+        return;
+      }
+      files.forEach(function(f, i){ setTimeout(function(){ directSave(f.blob, f.name); }, i*500); });
+      toast("กำลังดาวน์โหลด " + files.length + " รูป", "ได้ไม่ครบ?", function(){ showModal(blobs, names); }, 12000);
       return;
     }
     if (!downloads){ showModal(files.map(function(f){ return f.blob; })); return; }
