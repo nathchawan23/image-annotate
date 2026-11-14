@@ -98,6 +98,7 @@ input[type=range]{width:120px;accent-color:var(--accent)}
 .seg button svg path{vector-effect:non-scaling-stroke}
 .check{display:flex;align-items:center;gap:6px}
 .check input{width:16px;height:16px;accent-color:var(--accent)}
+.numIn{width:68px;height:30px;border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:0 6px;text-align:center}
 [hidden]{display:none !important}
 
 .stage{
@@ -239,6 +240,10 @@ canvas{display:block;touch-action:none;background:#fff}
       <button type="button" data-both="1" aria-label="หัวสองด้าน" title="หัวสองด้าน"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h16M15 7l5 5-5 5M9 7l-5 5 5 5"></path></svg></button>
     </div>
   </div>
+  <div class="group" id="numGroup" hidden>
+    <label class="lab" for="numIn" id="numLab">เริ่มที่เลข</label>
+    <input class="numIn" type="number" id="numIn" min="0" max="999" step="1" value="1" inputmode="numeric">
+  </div>
   <div class="group" id="stampGroup" hidden>
     <span class="lab">แบบ</span>
     <div class="seg" id="stampSeg">
@@ -319,6 +324,9 @@ var fileName = "รูป";
 var nextId = 1;
 var drag = null, raf = 0;
 var docs = [], cur = -1, isSample = true;
+var numOverride = null;
+function lastNum(){ for (var i=objs.length-1;i>=0;i--) if (objs[i].type === "num") return objs[i]; return null; }
+function nextNum(){ if (numOverride !== null) return numOverride; var l = lastNum(); return l ? l.n + 1 : 1; }
 
 /* ---------- sizes ---------- */
 function sw(l){ return (1.5 + l*0.9) * unit; }
@@ -434,7 +442,7 @@ function drawObj(c, o){
     c.strokeStyle = contrast(o.color); c.lineWidth = Math.max(1, r*0.1);
     c.beginPath(); c.arc(o.x, o.y, r, 0, Math.PI*2); c.stroke();
     c.fillStyle = contrast(o.color);
-    c.font = "700 " + (r*(o.n > 9 ? 1.05 : 1.25)) + "px " + FONT;
+    c.font = "700 " + (r*(o.n > 99 ? 0.8 : o.n > 9 ? 1.05 : 1.25)) + "px " + FONT;
     c.textAlign = "center"; c.textBaseline = "middle";
     c.fillText(String(o.n), o.x, o.y + r*0.06);
   } else if (o.type === "stamp"){
@@ -615,6 +623,11 @@ function syncUI(){
   for (i=0;i<ab.length;i++) ab[i].setAttribute("aria-pressed", ab[i].dataset.align === al ? "true" : "false");
   var bc = (s && s.type === "text") ? (s.border || "") : (textBorder || ""), bb = document.querySelectorAll("#borders .sw");
   for (i=0;i<bb.length;i++) bb[i].setAttribute("aria-checked", bb[i].dataset.c === bc ? "true" : "false");
+  var selNum = s && s.type === "num";
+  $("numGroup").hidden = !(tool === "num" || selNum);
+  $("numLab").textContent = selNum ? "เลขของชิ้นนี้" : (lastNum() ? "เลขถัดไป" : "เริ่มที่เลข");
+  var nv = selNum ? s.n : nextNum();
+  if (parseInt($("numIn").value, 10) !== nv) $("numIn").value = nv;
   cv.style.cursor = tool === "select" ? "default" : (tool === "text" ? "text" : "crosshair");
 }
 function setTool(t){ closeEditor(true); tool = t; if (t !== "select") selId = null; syncUI(); render(); }
@@ -648,7 +661,7 @@ function stash(){
 function useDoc(d){ base=d.base; W=d.W; H=d.H; unit=d.unit; objs=d.objs; states=d.states; sidx=d.sidx; fileName=d.name; }
 function show(i){
   closeEditor(true); stash();
-  cur = i; useDoc(docs[i]); selId = null;
+  cur = i; useDoc(docs[i]); selId = null; numOverride = null;
   cv.width = W; cv.height = H;
   syncUI(); fit(); renderStrip();
 }
@@ -820,8 +833,8 @@ cv.addEventListener("pointerdown", function(ev){
   else if (tool === "rect" || tool === "ellipse") o = {id:nextId++, type:tool, color:color, lv:lv, x:p.x, y:p.y, w:0, h:0, fill:fill};
   else if (tool === "pen") o = {id:nextId++, type:"pen", color:color, lv:lv, pts:[[p.x,p.y]]};
   else if (tool === "num"){
-    var n = 0; for (i=0;i<objs.length;i++) if (objs[i].type === "num") n = Math.max(n, objs[i].n);
-    o = {id:nextId++, type:"num", color:color, lv:lv, x:p.x, y:p.y, n:n+1};
+    var n = nextNum(); numOverride = null;
+    o = {id:nextId++, type:"num", color:color, lv:lv, x:p.x, y:p.y, n:n};
   }
   else o = {id:nextId++, type:"stamp", color:color, lv:lv, x:p.x, y:p.y, kind:stampKind, fill:fill};
   objs.push(o); selId = null;
@@ -978,6 +991,17 @@ $("headSeg").addEventListener("click", function(ev){
   var s = selId ? byId(selId) : null;
   if (s && s.type === "arrow" && !!s.both !== arrowBoth){ s.both = arrowBoth; commit(); render(); } else syncUI();
 });
+$("numIn").addEventListener("input", function(){
+  var v = parseInt(this.value, 10); if (isNaN(v)) return;
+  v = Math.max(0, Math.min(999, v));
+  var s = selId ? byId(selId) : null;
+  if (s && s.type === "num"){ s.n = v; render(); } else numOverride = v;
+});
+$("numIn").addEventListener("change", function(){
+  var s = selId ? byId(selId) : null;
+  if (s && s.type === "num") commit(); else syncUI();
+});
+$("numIn").addEventListener("keydown", function(ev){ if (ev.key === "Enter") this.blur(); });
 $("undoBtn").addEventListener("click", undo);
 $("redoBtn").addEventListener("click", redo);
 function delSel(){
